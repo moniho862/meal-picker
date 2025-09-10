@@ -144,13 +144,10 @@
         </div>
         <div class="btns" style="margin-top:10px">
           <button id="add">新增</button>
-          <button class="ghost" id="export">匯出 JSON</button>
-          <label class="chip" for="importFile">匯入 JSON<input id="importFile" type="file" accept=".json,application/json"></label>
-
-          <!-- ★ 小補丁：匯入 CSV + 從貼上匯入 -->
+          <!-- CSV 專用： -->
+          <button class="ghost" id="exportCsv">匯出 CSV</button>
           <label class="chip" for="importCsv">匯入 CSV<input id="importCsv" type="file" accept=".csv,text/csv"></label>
           <button class="ghost" id="pasteOpen">從貼上匯入</button>
-
           <button class="danger" id="reset">清空全部</button>
         </div>
 
@@ -218,7 +215,7 @@ const els = {
   q:$('#q'), price:$('#price'), time:$('#time'), walk:$('#walk'), tags:$('#tags'),
   list:$('#list'), result:$('#result'),
   add:$('#add'), name:$('#name'), nprice:$('#nprice'), nwalk:$('#nwalk'), ntags:$('#ntags'), ntime:$('#ntime'), nnote:$('#nnote'),
-  export:$('#export'), importFile:$('#importFile'), reset:$('#reset'),
+  exportCsv:$('#exportCsv'), importCsv:$('#importCsv'), reset:$('#reset'),
   pick1:$('#pick1'), pick3:$('#pick3'), spin:$('#spin'),
   wheelBox:$('#wheelBox'), wheel:$('#wheel'), spinGo:$('#spinGo'), spinExit:$('#spinExit'),
   modal:$('#modal'), modalTitle:$('#modalTitle'), modalContent:$('#modalContent'), modalClose:$('#modalClose')
@@ -288,40 +285,121 @@ els.add.onclick=()=>{
   renderList();
 };
 
-els.export.onclick=()=>{
-  const data = JSON.stringify(state.items, null, 2);
-  download('meal-list.json', data);
+// ===== 匯出 CSV =====
+els.exportCsv.onclick = ()=>{
+  const rows = state.items.map(x=>[x.name, x.price, x.walk ?? '', (x.tags||[]).join(','), x.time||'', x.note||'']);
+  const header = ['name','price','walk','tags','time','note'];
+  const csv = [header, ...rows].map(r=>r.map(csvEscape).join(',')).join('\r\n');
+  download('meal-list.csv', csv, 'text/csv;charset=utf-8');
+  alert('已匯出 CSV：meal-list.csv');
 };
 
-els.importFile.addEventListener('change', (e)=>{
+function csvEscape(v){
+  const s = String(v??'');
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+// ===== 匯入 CSV（支援覆蓋/追加） =====
+els.importCsv.addEventListener('change', (e) => {
   const file = e.target.files[0];
-  if(!file) return;
+  if (!file) return;
   const reader = new FileReader();
-  reader.onload = (evt)=>{
-    try{
-      const list = JSON.parse(evt.target.result);
-      if(!Array.isArray(list)) throw new Error('格式錯誤');
-      const mapped = list.map(x=>({
-        id: x.id || uid(),
-        name: String(x.name||'').trim(),
-        price: oneOf(String(x.price||'$'),['$','$$','$$$']),
-        walk: Number(x.walk||0),
-        tags: Array.isArray(x.tags) ? x.tags.map(String) : parseTags(String(x.tags||'')),
-        time: oneOf(String(x.time||''),['早餐','午餐','晚餐','宵夜','']),
-        note: String(x.note||''),
-        lastPicked: Number(x.lastPicked||0)
-      })).filter(x=>x.name);
-      state.items = mapped;
-      save();
-      renderTagChips(); // 匯入後同步更新
-      renderList();
-      alert('匯入完成，共 '+mapped.length+' 筆');
-    }catch(err){
-      alert('匯入失敗：'+err.message);
+  reader.onload = (evt) => {
+    try {
+      const rows = parseSeparatedValues(evt.target.result);
+      const overwrite = confirm('要覆蓋現有清單嗎？\n按「確定」= 覆蓋；按「取消」= 追加');
+      applyImportedRows(rows, overwrite);
+    } catch (err) {
+      alert('CSV 解析失敗：' + err.message);
+    } finally {
+      e.target.value = ''; // 允許下次選同一檔案
     }
   };
-  reader.readAsText(file,'utf-8');
+  reader.readAsText(file, 'utf-8');
 });
+
+// ===== 從貼上匯入（Tab/逗號自動辨識） =====
+const pasteModal = document.getElementById('pasteModal');
+const pasteOpen = document.getElementById('pasteOpen');
+const pasteClose = document.getElementById('pasteClose');
+const pasteArea  = document.getElementById('pasteArea');
+const pasteImport = document.getElementById('pasteImport');
+
+if (pasteOpen) pasteOpen.onclick = () => pasteModal.classList.add('show');
+if (pasteClose) pasteClose.onclick = () => pasteModal.classList.remove('show');
+if (pasteModal) pasteModal.addEventListener('click', e => { if (e.target === pasteModal) pasteModal.classList.remove('show'); });
+
+if (pasteImport) pasteImport.onclick = () => {
+  const raw = (pasteArea.value || '').trim();
+  if (!raw) { alert('請先貼上表格內容'); return; }
+  try {
+    const rows = parseSeparatedValues(raw);
+    const overwrite = confirm('要覆蓋現有清單嗎？\n按「確定」= 覆蓋；按「取消」= 追加');
+    applyImportedRows(rows, overwrite);
+    pasteModal.classList.remove('show');
+    pasteArea.value='';
+  } catch (err) {
+    alert('貼上資料解析失敗：' + err.message);
+  }
+};
+
+function parseSeparatedValues(text){
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(Boolean);
+  if (!lines.length) return [];
+  const commaCount = (lines[0].match(/,/g) || []).length;
+  const tabCount = (lines[0].match(/\t/g) || []).length;
+  const sep = commaCount >= tabCount ? ',' : '\t';
+
+  const parseLine = (line) => {
+    const out = [];
+    let cur = '', inQuote = false;
+    for (let i=0;i<line.length;i++){
+      const ch = line[i];
+      if (ch === '"'){
+        if (inQuote && line[i+1] === '"'){ cur += '"'; i++; }
+        else inQuote = !inQuote;
+      } else if (ch === sep && !inQuote){
+        out.push(cur); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  };
+
+  const rows = lines.map(parseLine);
+  const header = rows[0].map(x => x.toLowerCase());
+  const looksHeader = header.includes('name') && header.includes('price');
+  return looksHeader ? rows.slice(1) : rows;
+}
+
+function applyImportedRows(rows, overwrite=false){
+  const next = overwrite ? [] : (state.items||[]).slice();
+  let added = 0;
+  rows.forEach(cols => {
+    if (!cols.length) return;
+    const [name, price, walk, tags, time, note] = cols;
+    if (!name) return;
+    next.push({
+      id: uid(),
+      name: String(name).trim(),
+      price: oneOf(String(price||'$'), ['$', '$$', '$$$']),
+      walk: Number(walk || 0),
+      tags: String(tags||'').split(',').map(s=>s.trim()).filter(Boolean),
+      time: oneOf(String(time||''), ['早餐','午餐','晚餐','宵夜','']),
+      note: String(note||''),
+      lastPicked: 0
+    });
+    added++;
+  });
+  state.items = next;
+  save();
+  renderTagChips();
+  renderList();
+  alert((overwrite?'覆蓋完成，':'追加完成，') + '共處理 ' + added + ' 筆。');
+}
 
 els.reset.onclick=()=>{
   if(confirm('確定要清空清單嗎？此動作無法復原。')){
@@ -504,102 +582,6 @@ function showResultsModal(items, title='抽選結果'){
 els.modalClose.onclick = ()=> els.modal.classList.remove('show');
 els.modal.addEventListener('click', (e)=>{ if(e.target===els.modal) els.modal.classList.remove('show'); });
 
-// ====== 小補丁：CSV 匯入 + 從貼上匯入 ======
-const pasteModal = document.getElementById('pasteModal');
-const pasteOpen = document.getElementById('pasteOpen');
-const pasteClose = document.getElementById('pasteClose');
-const pasteArea  = document.getElementById('pasteArea');
-const pasteImport = document.getElementById('pasteImport');
-const importCsv = document.getElementById('importCsv');
-
-if (pasteOpen) pasteOpen.onclick = () => pasteModal.classList.add('show');
-if (pasteClose) pasteClose.onclick = () => pasteModal.classList.remove('show');
-if (pasteModal) pasteModal.addEventListener('click', e => { if (e.target === pasteModal) pasteModal.classList.remove('show'); });
-
-if (importCsv) importCsv.addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (evt) => {
-    try {
-      const rows = parseSeparatedValues(evt.target.result);
-      applyImportedRows(rows);
-    } catch (err) {
-      alert('CSV 解析失敗：' + err.message);
-    }
-  };
-  reader.readAsText(file, 'utf-8');
-});
-
-if (pasteImport) pasteImport.onclick = () => {
-  const raw = (pasteArea.value || '').trim();
-  if (!raw) { alert('請先貼上表格內容'); return; }
-  try {
-    const rows = parseSeparatedValues(raw);
-    applyImportedRows(rows);
-    pasteModal.classList.remove('show');
-    pasteArea.value='';
-  } catch (err) {
-    alert('貼上資料解析失敗：' + err.message);
-  }
-};
-
-function parseSeparatedValues(text){
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(Boolean);
-  if (!lines.length) return [];
-  const commaCount = (lines[0].match(/,/g) || []).length;
-  const tabCount = (lines[0].match(/\t/g) || []).length;
-  const sep = commaCount >= tabCount ? ',' : '\t';
-
-  const parseLine = (line) => {
-    const out = [];
-    let cur = '', inQuote = false;
-    for (let i=0;i<line.length;i++){
-      const ch = line[i];
-      if (ch === '"'){
-        if (inQuote && line[i+1] === '"'){ cur += '"'; i++; }
-        else inQuote = !inQuote;
-      } else if (ch === sep && !inQuote){
-        out.push(cur); cur = '';
-      } else {
-        cur += ch;
-      }
-    }
-    out.push(cur);
-    return out.map(s => s.trim());
-  };
-
-  const rows = lines.map(parseLine);
-  const header = rows[0].map(x => x.toLowerCase());
-  const looksHeader = header.includes('name') && header.includes('price');
-  return looksHeader ? rows.slice(1) : rows;
-}
-
-function applyImportedRows(rows){
-  let added = 0;
-  rows.forEach(cols => {
-    if (!cols.length) return;
-    const [name, price, walk, tags, time, note] = cols;
-    if (!name) return;
-    state.items.push({
-      id: uid(),
-      name: String(name).trim(),
-      price: oneOf(String(price||'$'), ['$', '$$', '$$$']),
-      walk: Number(walk || 0),
-      tags: String(tags||'').split(',').map(s=>s.trim()).filter(Boolean),
-      time: oneOf(String(time||''), ['早餐','午餐','晚餐','宵夜','']),
-      note: String(note||''),
-      lastPicked: 0
-    });
-    added++;
-  });
-  save();
-  renderTagChips();
-  renderList();
-  alert('匯入完成，共新增 ' + added + ' 筆。');
-}
-// ====== 小補丁結束 ======
-
 function parseTags(s){ return s.split(',').map(x=>x.trim()).filter(Boolean); }
 function oneOf(v, arr){ return arr.includes(v) ? v : arr[0]; }
 function esc(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
@@ -630,9 +612,9 @@ function weightedSample(scored, k){
 }
 
 // Utility: download
-function download(filename, text){
+function download(filename, text, mime='application/octet-stream'){
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
+  a.href = URL.createObjectURL(new Blob([text], {type: mime}));
   a.download = filename;
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 1000);

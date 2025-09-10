@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>吃飯選擇器</title>
+<style>
+  :root{
+    --bg:#fafafa;
+    --card:#ffffff;
+    --ink:#111;
+    --muted:#666;
+    --accent:#2e7df6;
+    --chip:#f0f3f9;
+    --border:#e9e9ee;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";}
+  header{position:sticky;top:0;background:linear-gradient(180deg,#fff,rgba(255,255,255,0.92));backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--border);z-index:10}
+  .wrap{max-width:900px;margin:0 auto;padding:20px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  h1{font-size:22px;margin:0;padding:14px 20px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 1px 0 rgba(0,0,0,.04)}
+  label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+  input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;font-size:15px}
+  button{appearance:none;border:none;border-radius:12px;padding:10px 14px;font-size:15px;cursor:pointer;background:var(--accent);color:#fff}
+  button.alt{background:#f1f3f5;color:#111;border:1px solid var(--border)}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:var(--chip);border:1px solid var(--border);font-size:13px;margin:4px 6px 0 0;cursor:pointer;user-select:none}
+  .chip input{display:none}
+  .chip.active{outline:2px solid var(--accent);background:#eaf1ff}
+  .result{display:grid;grid-template-columns:1fr;gap:12px}
+  .result .item{display:flex;justify-content:space-between;align-items:flex-start;padding:14px;border:1px solid var(--border);border-radius:12px;background:#fff}
+  .result .item h3{margin:0 0 6px 0}
+  .muted{color:var(--muted)}
+  .small{font-size:12px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .right{margin-left:auto}
+  .divider{height:1px;background:var(--border);margin:10px 0}
+  .footer{font-size:12px;color:var(--muted);text-align:center;padding:18px 0}
+  .pill{display:inline-block;background:#eef2ff;border:1px solid var(--border);color:#223; padding:4px 8px;border-radius:999px;font-size:12px;margin-right:6px}
+  .danger{background:#e53935}
+  .ghost{background:transparent;color:#111;border:1px solid var(--border)}
+  .spin-wheel{width:100%;height:280px;border-radius:14px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;background:#fff}
+  .slice{position:absolute;left:50%;top:50%;transform-origin:0 0}
+  .marker{position:absolute;top:8px;left:50%;transform:translate(-50%);font-size:24px}
+
+  /* Modal */
+  .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.28);backdrop-filter:blur(3px);z-index:50;padding:18px}
+  .modal.show{display:flex}
+  .modal .box{width:min(560px,100%);background:#fff;border-radius:14px;border:1px solid var(--border);box-shadow:0 10px 30px rgba(0,0,0,.15);padding:14px}
+  .modal .box h3{margin:0 0 8px}
+  .modal .box .result{max-height:60vh;overflow:auto}
+  .modal .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+</style>
+<script defer data-domain="meal-picker.tiiny.site" src="https://analytics.tiiny.site/js/plausible.js"></script></head>
+<body>
+  <header><h1>🍽️ 吃飯選擇器</h1></header>
+  <div class="wrap">
+    <div class="card">
+      <div class="row">
+        <div style="flex:1 1 260px">
+          <label>關鍵字</label>
+          <input id="q" placeholder="輸入店名、關鍵詞…">
+        </div>
+        <div style="width:150px">
+          <label>價位</label>
+          <select id="price">
+            <option value="">不限</option>
+            <option value="$">$</option>
+            <option value="$$">$$</option>
+            <option value="$$$">$$$</option>
+          </select>
+        </div>
+        <div style="width:160px">
+          <label>時段</label>
+          <select id="time">
+            <option value="">不限</option>
+            <option>早餐</option>
+            <option>午餐</option>
+            <option>晚餐</option>
+            <option>宵夜</option>
+          </select>
+        </div>
+        <div style="width:160px">
+          <label>距離(步行分鐘)</label>
+          <select id="walk">
+            <option value="">不限</option>
+            <option value="5">≤5</option>
+            <option value="10">≤10</option>
+            <option value="15">≤15</option>
+            <option value="20">≤20</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label>標籤（多選）</label>
+        <div id="tags" class="muted small">目前沒有標籤，新增店家時可用逗號輸入：例如「便當,湯麵」</div>
+      </div>
+      <div class="btns" style="margin-top:12px">
+        <button id="pick1">抽一個</button>
+        <button class="alt" id="pick3">抽三個給我選</button>
+        <button class="alt" id="spin">轉盤模式</button>
+        <span class="right small muted">提示：可先新增清單或匯入 JSON</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3 style="margin:0 0 8px">📋 清單（上方輸入，新增後出現在下方）</h3>
+
+        <!-- Form first -->
+        <div class="row">
+          <div style="flex:1 1 200px">
+            <label>店名</label>
+            <input id="name" placeholder="例如：阿明滷肉飯">
+          </div>
+          <div style="width:120px">
+            <label>價位</label>
+            <select id="nprice">
+              <option value="$">$</option>
+              <option value="$$">$$</option>
+              <option value="$$$">$$$</option>
+            </select>
+          </div>
+          <div style="width:140px">
+            <label>步行(分鐘)</label>
+            <input id="nwalk" type="number" min="0" placeholder="如 8">
+          </div>
+          <div style="flex:1 1 180px">
+            <label>標籤 (逗號分隔)</label>
+            <input id="ntags" placeholder="如：便當,湯麵,內用">
+          </div>
+          <div style="flex:1 1 200px">
+            <label>時段</label>
+            <select id="ntime">
+              <option>早餐</option><option selected>午餐</option><option>晚餐</option><option>宵夜</option>
+            </select>
+          </div>
+          <div style="flex:1 1 240px">
+            <label>備註</label>
+            <input id="nnote" placeholder="如：招牌雞腿飯">
+          </div>
+        </div>
+        <div class="btns" style="margin-top:10px">
+          <button id="add">新增</button>
+          <button class="ghost" id="export">匯出 JSON</button>
+          <label class="chip" for="importFile">匯入 JSON<input id="importFile" type="file" accept=".json,application/json"></label>
+          <button class="danger" id="reset">清空全部</button>
+        </div>
+
+        <div class="divider"></div>
+        <div id="list" class="result"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 8px">🎯 結果</h3>
+        <div id="result" class="result"></div>
+        <div id="wheelBox" style="display:none">
+          <div class="spin-wheel" id="wheel">
+            <div class="marker">▼</div>
+          </div>
+          <div class="btns" style="margin-top:10px">
+            <button id="spinGo">開始轉</button>
+            <button class="alt" id="spinExit">返回列表</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">資料只存於此裝置（LocalStorage）。可匯出/匯入與朋友共享清單。</div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal" id="modal">
+    <div class="box">
+      <div class="head">
+        <h3 id="modalTitle">抽選結果</h3>
+        <div class="btns">
+          <button class="ghost" id="modalClose">關閉</button>
+        </div>
+      </div>
+      <div id="modalContent" class="result"></div>
+    </div>
+  </div>
+
+<script>
+// DOM helper
+const $ = (sel) => document.querySelector(sel);
+
+const KEY='mealPicker.v1';
+let state = load();
+if(!state.items){ state.items = []; save(); }
+
+const els = {
+  q:$('#q'), price:$('#price'), time:$('#time'), walk:$('#walk'), tags:$('#tags'),
+  list:$('#list'), result:$('#result'),
+  add:$('#add'), name:$('#name'), nprice:$('#nprice'), nwalk:$('#nwalk'), ntags:$('#ntags'), ntime:$('#ntime'), nnote:$('#nnote'),
+  export:$('#export'), importFile:$('#importFile'), reset:$('#reset'),
+  pick1:$('#pick1'), pick3:$('#pick3'), spin:$('#spin'),
+  wheelBox:$('#wheelBox'), wheel:$('#wheel'), spinGo:$('#spinGo'), spinExit:$('#spinExit'),
+  modal:$('#modal'), modalTitle:$('#modalTitle'), modalContent:$('#modalContent'), modalClose:$('#modalClose')
+};
+
+// ---- 動態標籤（無預設）：完全來自目前清單 ----
+function allTags(){
+  const set = new Set();
+  (state.items||[]).forEach(it => (it.tags||[]).forEach(t => t && set.add(String(t))));
+  return [...set].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+}
+
+function renderTagChips(){
+  const tags = allTags();
+  const checked = new Set([...els.tags.querySelectorAll('input:checked')].map(x=>x.value)); // 保留原勾選
+  els.tags.innerHTML = tags.length ? '' : '<span class="muted small">目前沒有標籤，新增店家時可用逗號輸入：例如「便當,湯麵」</span>';
+  tags.forEach(t=>{
+    const d=document.createElement('label');
+    d.className='chip';
+    const input=document.createElement('input');
+    input.type='checkbox';
+    input.value=t;
+    const span=document.createElement('span');
+    span.textContent=t;
+    d.appendChild(input);
+    d.appendChild(span);
+
+    input.checked = checked.has(t);
+    d.classList.toggle('active', input.checked);
+
+    // 點整個 chip 切換，且阻止事件互卡（iOS/Safari ok）
+    d.addEventListener('click', (e)=>{
+      if(e.target !== input){ input.checked = !input.checked; }
+      d.classList.toggle('active', input.checked);
+      e.preventDefault();
+      e.stopPropagation();
+      renderList();
+    });
+
+    // 監聽 checkbox 自己的變動（鍵盤/輔助工具）
+    input.addEventListener('change', ()=>{
+      d.classList.toggle('active', input.checked);
+      renderList();
+    });
+
+    els.tags.appendChild(d);
+  });
+}
+renderTagChips();
+
+// Event bindings
+[els.q,els.price,els.time,els.walk].forEach(x=>x.addEventListener('input',renderList));
+
+els.add.onclick=()=>{
+  const name=els.name.value.trim();
+  if(!name){ alert('請輸入店名'); return; }
+  const item={
+    id:uid(),
+    name,
+    price:els.nprice.value,
+    walk: parseInt(els.nwalk.value||'0',10) || 0,
+    tags: parseTags(els.ntags.value),
+    time: els.ntime.value,
+    note: els.nnote.value.trim(),
+    lastPicked: 0
+  };
+  state.items.push(item);
+  save(); clearNewForm();
+  renderTagChips(); // 新增後同步更新標籤
+  renderList();
+};
+
+els.export.onclick=()=>{
+  const data = JSON.stringify(state.items, null, 2);
+  download('meal-list.json', data);
+};
+
+els.importFile.addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt)=>{
+    try{
+      const list = JSON.parse(evt.target.result);
+      if(!Array.isArray(list)) throw new Error('格式錯誤');
+      const mapped = list.map(x=>({
+        id: x.id || uid(),
+        name: String(x.name||'').trim(),
+        price: oneOf(String(x.price||'$'),['$','$$','$$$']),
+        walk: Number(x.walk||0),
+        tags: Array.isArray(x.tags) ? x.tags.map(String) : parseTags(String(x.tags||'')),
+        time: oneOf(String(x.time||''),['早餐','午餐','晚餐','宵夜','']),
+        note: String(x.note||''),
+        lastPicked: Number(x.lastPicked||0)
+      })).filter(x=>x.name);
+      state.items = mapped;
+      save();
+      renderTagChips(); // 匯入後同步更新
+      renderList();
+      alert('匯入完成，共 '+mapped.length+' 筆');
+    }catch(err){
+      alert('匯入失敗：'+err.message);
+    }
+  };
+  reader.readAsText(file,'utf-8');
+});
+
+els.reset.onclick=()=>{
+  if(confirm('確定要清空清單嗎？此動作無法復原。')){
+    state.items=[]; save();
+    renderTagChips(); // 清空後同步更新
+    renderList(); els.result.innerHTML='';
+  }
+};
+
+els.pick1.onclick=()=>runPick(1);
+els.pick3.onclick=()=>runPick(3);
+
+els.spin.onclick=()=>{
+  const candidates = filteredItems();
+  if(candidates.length<2){ alert('至少需要 2 個項目才能使用轉盤'); return; }
+  buildWheel(candidates.slice(0,12)); // 上限 12 片
+  els.wheelBox.style.display='block';
+  els.result.innerHTML='';
+  window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
+};
+els.spinExit.onclick=()=>{ els.wheelBox.style.display='none'; };
+
+els.spinGo.onclick=()=>{
+  const wheel=els.wheel;
+  const slices=[...wheel.querySelectorAll('.slice')];
+  if(!slices.length) return;
+  const spins = 5 + Math.random()*3;
+  const final = Math.floor(Math.random()*slices.length);
+  const anglePer = 360 / slices.length;
+  const targetAngle = 360*spins + final*anglePer + anglePer/2;
+  wheel.style.transition='transform 3.2s cubic-bezier(.2,.8,.2,1)';
+  wheel.style.transform='rotate('+(-targetAngle)+'deg)';
+  setTimeout(()=>{
+    const name = slices[final].dataset.name;
+    notifyPick(name);
+  }, 3300);
+};
+
+function notifyPick(name){
+  const it = state.items.find(x=>x.name===name);
+  if(it){ it.lastPicked = Date.now(); save(); }
+  showResultsModal([it || {name}]);
+  els.wheelBox.style.display='none';
+}
+
+function buildWheel(items){
+  const box=els.wheel;
+  box.innerHTML='<div class="marker">▼</div>';
+  box.style.transform='rotate(0deg)';
+  box.style.transition='none';
+  const n=items.length;
+  const angle=360/n;
+  for(let i=0;i<n;i++){
+    const it=items[i];
+    const slice=document.createElement('div');
+    slice.className='slice';
+    slice.dataset.name = it.name;
+    const rot=i*angle;
+    slice.style.transform='rotate('+rot+'deg) translate(0,0)';
+    slice.style.width='50%';
+    slice.style.height='50%';
+    slice.style.borderTop='140px solid rgba(46,125,246,'+(0.2 + 0.6*((i%2)?1:0.5))+')';
+    slice.style.borderLeft='140px solid transparent';
+    slice.style.borderRight='0 solid transparent';
+    slice.style.borderBottom='0 solid transparent';
+    slice.style.position='absolute';
+    slice.style.left='50%'; slice.style.top='50%';
+    slice.style.transformOrigin='0 0';
+    // Label
+    const label=document.createElement('div');
+    label.textContent=it.name;
+    label.style.position='absolute';
+    label.style.left='6px'; label.style.top='-120px';
+    label.style.transform='rotate('+(90)+'deg)';
+    label.style.whiteSpace='nowrap';
+    label.style.fontSize='12px';
+    slice.appendChild(label);
+    box.appendChild(slice);
+  }
+}
+
+function runPick(n){
+  const candidates = filteredItems();
+  if(!candidates.length){ showResultsModal([{name:'沒有符合條件的選項，請調整篩選或先新增清單。',note:''}], '提示'); return; }
+  const scored = candidates.map(x=>{
+    const hours = x.lastPicked ? (Date.now()-x.lastPicked)/36e5 : 999;
+    const weight = Math.min(3, 1 + Math.log10(hours+1));
+    return {it:x, w:weight};
+  });
+  const picks = weightedSample(scored, Math.min(n, candidates.length));
+  picks.forEach(p=>{ p.lastPicked=Date.now(); });
+  save();
+  showResultsModal(picks);
+}
+
+function renderResultCards(items){
+  return items.map(it=>{
+    const t = (it.tags||[]).map(x=>'<span class="pill">'+esc(x)+'</span>').join('');
+    const gmap='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(it.name);
+    return `<div class="item">
+      <div>
+        <h3>${esc(it.name)}</h3>
+        <div class="small muted">${it.price?('💸'+esc(it.price))+'　':''}${it.walk?('🚶‍♀️'+esc(it.walk)+' 分　'):''}${esc(it.time||'')}</div>
+        <div style="margin:6px 0">${t}</div>
+        ${it.note?'<div class="small">'+esc(it.note)+'</div>':''}
+      </div>
+      <div class="btns">
+        <a href="${gmap}" target="_blank" rel="noopener"><button class="alt">開地圖</button></a>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderList(){
+  const arr = filteredItems(true);
+  els.list.innerHTML = arr.map(it => `
+    <div class="item">
+      <div>
+        <h3>${esc(it.name)}</h3>
+        <div class="small muted">${'💸'+esc(it.price)}　🚶‍♀️${it.walk?esc(it.walk)+'分':''}　${esc(it.time)}</div>
+        <div style="margin:6px 0">${(it.tags||[]).map(x=>'<span class="pill">'+esc(x)+'</span>').join('')}</div>
+        ${it.note?'<div class="small">'+esc(it.note)+'</div>':''}
+      </div>
+      <div class="btns">
+        <button class="ghost" onclick="editItem('${it.id}')">編輯</button>
+        <button class="ghost" onclick="removeItem('${it.id}')">刪除</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function filteredItems(skipSort){
+  const kw = els.q.value.trim().toLowerCase();
+  const price = els.price.value;
+  const time = els.time.value;
+  const walk = els.walk.value ? parseInt(els.walk.value,10) : null;
+  const chosenTags = [...els.tags.querySelectorAll('input:checked')].map(x=>x.value);
+  let arr = state.items.filter(it=>{
+    const byKw = !kw || [it.name,it.note,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(kw);
+    const byPrice = !price || it.price===price;
+    const byTime = !time || it.time===time;
+    const byWalk = !walk || (it.walk||999) <= walk;
+    const byTags = !chosenTags.length || chosenTags.every(t => (it.tags||[]).includes(t));
+    return byKw && byPrice && byTime && byWalk && byTags;
+  });
+  if(!skipSort){
+    arr.sort((a,b)=> (a.lastPicked||0)-(b.lastPicked||0) || (a.walk||999)-(b.walk||999) || (a.price||'').length-(b.price||'').length );
+  }
+  return arr;
+}
+
+function editItem(id){
+  const it = state.items.find(x=>x.id===id);
+  if(!it) return;
+  const name = prompt('店名', it.name); if(name===null) return;
+  const price = prompt('價位（$ / $$ / $$$）', it.price); if(price===null) return;
+  const walk = prompt('步行分鐘', it.walk); if(walk===null) return;
+  const tags = prompt('標籤（逗號分隔）', (it.tags||[]).join(',')); if(tags===null) return;
+  const time = prompt('時段（早餐/午餐/晚餐/宵夜）', it.time); if(time===null) return;
+  const note = prompt('備註', it.note||''); if(note===null) return;
+  Object.assign(it, {name, price:oneOf(price,['$','$$','$$$']), walk:Number(walk||0), tags:parseTags(tags), time:oneOf(time,['早餐','午餐','晚餐','宵夜','']), note});
+  save();
+  renderTagChips(); // 編輯後同步更新標籤
+  renderList();
+}
+
+function removeItem(id){
+  if(!confirm('要刪除這個項目嗎？')) return;
+  state.items = state.items.filter(x=>x.id!==id);
+  save();
+  renderTagChips(); // 刪除後同步更新標籤
+  renderList();
+}
+
+// Modal helpers
+function showResultsModal(items, title='抽選結果'){
+  els.modalTitle.textContent = title;
+  els.modalContent.innerHTML = renderResultCards(items);
+  els.modal.classList.add('show');
+}
+els.modalClose.onclick = ()=> els.modal.classList.remove('show');
+els.modal.addEventListener('click', (e)=>{ if(e.target===els.modal) els.modal.classList.remove('show'); });
+
+function parseTags(s){ return s.split(',').map(x=>x.trim()).filter(Boolean); }
+function oneOf(v, arr){ return arr.includes(v) ? v : arr[0]; }
+function esc(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+function uid(){ return Math.random().toString(36).slice(2,10); }
+
+function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || {items:[]}; }catch{ return {items:[]}; } }
+function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+
+function clearNewForm(){
+  els.name.value=''; els.nprice.value='$'; els.nwalk.value=''; els.ntags.value=''; els.ntime.value='午餐'; els.nnote.value='';
+}
+
+function weightedSample(scored, k){
+  const res=[];
+  const pool = scored.map(x=>({...x}));
+  while(res.length<k && pool.length){
+    const sum = pool.reduce((a,b)=>a+b.w,0);
+    let r = Math.random()*sum;
+    let idx=0;
+    for(; idx<pool.length; idx++){
+      r -= pool[idx].w;
+      if(r<=0) break;
+    }
+    const item = pool.splice(Math.max(0,idx),1)[0];
+    res.push(item.it);
+  }
+  return res;
+}
+
+// Utility: download
+function download(filename, text){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
+  a.download = filename;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+
+renderList();
+</script>
+</body>
+</html>
